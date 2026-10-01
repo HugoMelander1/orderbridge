@@ -1,0 +1,80 @@
+name: orderbridge
+x-app-environment: &app-environment
+  ASPNETCORE_ENVIRONMENT: Development
+  DOTNET_ENVIRONMENT: Development
+  ConnectionStrings__Database: Host=postgres;Database=orderbridge;Username=orderbridge;Password=${POSTGRES_PASSWORD:-orderbridge-local}
+  RabbitUri: amqp://orderbridge:${RABBIT_PASSWORD:-orderbridge-local}@rabbit:5672/
+  InventoryUrl: http://inventory:8080
+  FrontendOrigin: http://localhost:5173
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: orderbridge
+      POSTGRES_USER: orderbridge
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orderbridge-local}
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orderbridge -d orderbridge"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  rabbit:
+    image: rabbitmq:4.3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: orderbridge
+      RABBITMQ_DEFAULT_PASS: ${RABBIT_PASSWORD:-orderbridge-local}
+    ports: ["127.0.0.1:5672:5672", "127.0.0.1:15672:15672"]
+    volumes: [rabbit-data:/var/lib/rabbitmq]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  api:
+    build:
+      context: .
+      args: { PROJECT: OrderBridge.Api }
+    environment: *app-environment
+    ports: ["127.0.0.1:5080:8080"]
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbit: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "dotnet", "OrderBridge.Api.dll", "--health-probe"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  inventory:
+    build:
+      context: .
+      args: { PROJECT: OrderBridge.Inventory }
+    environment: *app-environment
+    ports: ["127.0.0.1:5081:8080"]
+    restart: unless-stopped
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "dotnet", "OrderBridge.Inventory.dll", "--health-probe"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  worker:
+    build:
+      context: .
+      args: { PROJECT: OrderBridge.Worker }
+    environment: *app-environment
+    restart: unless-stopped
+    depends_on:
+      inventory: { condition: service_healthy }
+      rabbit: { condition: service_healthy }
+  frontend:
+    build: frontend
+    ports: ["127.0.0.1:5173:80"]
+    depends_on:
+      api: { condition: service_healthy }
+volumes:
+  postgres-data:
+  rabbit-data:

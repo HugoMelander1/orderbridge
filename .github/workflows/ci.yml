@@ -1,0 +1,54 @@
+name: Build and test
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '10.0.x' }
+      - run: dotnet restore --locked-mode
+      - run: dotnet build --no-restore -c Release
+      - run: dotnet test --no-build -c Release --logger trx
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: backend-results, path: '**/TestResults/*.trx' }
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: frontend }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+  end-to-end:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: docker compose up --build --wait --wait-timeout 240
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run e2e -- --workers=1
+        working-directory: frontend
+      - run: docker compose logs --no-color > compose.log
+        if: always()
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-diagnostics
+          path: |
+            compose.log
+            frontend/test-results
+      - run: docker compose down -v
+        if: always()

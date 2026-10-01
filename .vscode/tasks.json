@@ -1,0 +1,10 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    { "label": "Build backend", "type": "process", "command": "dotnet", "args": ["build"], "problemMatcher": "$msCompile", "group": { "kind": "build", "isDefault": true } },
+    { "label": "Run Order API", "type": "process", "command": "dotnet", "args": ["run", "--project", "src/OrderBridge.Api", "--launch-profile", "http"], "problemMatcher": [] },
+    { "label": "Run Inventory API", "type": "process", "command": "dotnet", "args": ["run", "--project", "src/OrderBridge.Inventory", "--launch-profile", "http"], "problemMatcher": [] },
+    { "label": "Run worker", "type": "process", "command": "dotnet", "args": ["run", "--project", "src/OrderBridge.Worker"], "problemMatcher": [] },
+    { "label": "Run frontend", "type": "process", "command": "npm", "windows": { "command": "npm.cmd" }, "args": ["run", "dev"], "options": { "cwd": "${workspaceFolder}/frontend" }, "problemMatcher": [] }
+  ]
+}

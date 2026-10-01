@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OrderBridge.Api/OrderBridge.Api.csproj" />
+    <Project Path="src/OrderBridge.Core/OrderBridge.Core.csproj" />
+    <Project Path="src/OrderBridge.Inventory/OrderBridge.Inventory.csproj" />
+    <Project Path="src/OrderBridge.Worker/OrderBridge.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OrderBridge.Tests/OrderBridge.Tests.csproj" />
+  </Folder>
+</Solution>
