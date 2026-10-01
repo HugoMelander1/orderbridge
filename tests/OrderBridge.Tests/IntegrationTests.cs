@@ -72,11 +72,43 @@ public class IntegrationTests(Infrastructure infra) : IClassFixture<Infrastructu
             var row = await db.Outbox.SingleAsync(x => x.Queue == "orders.dead" && x.Payload.Contains(order.Id.ToString()));
             await using var connection = await Broker.Connect(infra.Rabbit.GetConnectionString()); await using var channel = await Broker.Channel(connection);
             await Broker.Publish(channel, row, CancellationToken.None);
-            var dead = await channel.BasicGetAsync("orders.dead", true); Assert.NotNull(dead); Assert.Contains(order.Id.ToString(), System.Text.Encoding.UTF8.GetString(dead.Body.Span));
+            bool found = false;
+            while (await channel.BasicGetAsync("orders.dead", true) is { } dead)
+                if (JsonSerializer.Deserialize<Envelope>(dead.Body.Span)!.OrderId == order.Id) found = true;
+            Assert.True(found);
             order = (await new OrderService(db).Replay(order.Id))!;
         }
         handler.Fail = false; await Process(Message(order), handler);
         await using (var db = infra.Db()) { Assert.Equal("Reserved", (await db.Orders.FindAsync(order.Id))!.Status); Assert.Equal(1, await db.Reservations.CountAsync(x => x.OrderId == order.Id)); }
+    }
+    [Fact]
+    public async Task Replay_after_four_lost_responses_keeps_the_original_reservation()
+    {
+        var order = await Create();
+        using var handler = new WarehouseHandler(infra) { LoseResponse = true };
+        var staleMessage = Message(order);
+        for (var attempt = 0; attempt < 4; attempt++)
+        {
+            await Process(Message(order), handler);
+            await using var db = infra.Db();
+            order = (await db.Orders.FindAsync(order.Id))!;
+        }
+        Assert.Equal("Failed", order.Status);
+        await using (var db = infra.Db())
+        {
+            Assert.Equal(1, await db.Reservations.CountAsync(x => x.OrderId == order.Id && x.Reserved));
+            order = (await new OrderService(db).Replay(order.Id))!;
+        }
+        var calls = handler.Calls;
+        await Process(staleMessage, handler);
+        Assert.Equal(calls, handler.Calls);
+        handler.LoseResponse = false;
+        await Process(Message(order), handler);
+        await using (var db = infra.Db())
+        {
+            Assert.Equal("Reserved", (await db.Orders.FindAsync(order.Id))!.Status);
+            Assert.Equal(1, await db.Reservations.CountAsync(x => x.OrderId == order.Id && x.Reserved));
+        }
     }
     [Fact]
     public async Task Outbox_survives_context_restart_and_publishes_confirmed_persistent_message()
