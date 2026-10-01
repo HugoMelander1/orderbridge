@@ -123,7 +123,11 @@ End-to-end tests cover temporary error recovery with exactly one reservation and
 - One frontend order-form test passed.
 - Headless Chromium smoke checks passed for desktop/mobile layout, no horizontal overflow and keyboard dialog dismissal against the real frontend with the API offline.
 - Integration execution was attempted, but all eight tests were blocked during fixture setup because Docker was unavailable. No PostgreSQL/RabbitMQ assertions ran.
-- Compose startup and browser end-to-end tests could not be verified on this machine because Docker was unavailable. CI is configured to execute them, but a CI pass is not claimed here.
+- Compose startup and browser end-to-end tests could not run on this machine because Docker was unavailable. They subsequently passed in GitHub Actions using its Linux Docker environment.
+
+### Continuous integration verification
+
+[The complete CI run](https://github.com/HugoMelander1/orderbridge/actions/runs/36887431921) passed backend/frontend builds, all 14 backend tests (five unit and nine PostgreSQL/RabbitMQ integration tests), the frontend form test, Compose health/startup checks and both browser end-to-end scenarios. The regression coverage includes replay after four lost HTTP responses, stale-generation delivery and the original durable reservation key.
 
 ## API examples
 
