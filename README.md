@@ -27,28 +27,6 @@ Leave the error enabled to see the order fail after four attempts. Restore Norma
 | Testing | xUnit, Testcontainers, Vitest, Playwright |
 | Local environment and CI | Docker Compose, GitHub Actions |
 
-## Design choices
-
-**Save the order and message together.** Creating an order also writes an outbox row in the same database transaction. The worker publishes it to RabbitMQ, so a broker outage does not leave an accepted order without a message to process.
-
-**Expect duplicate delivery.** Messages are processed at least once. The warehouse stores a reservation decision against the order ID, allowing repeated requests to return that decision without reducing stock again.
-
-**Separate temporary errors from stock problems.** Temporary failures retry after 5, 15 and 30 seconds. Insufficient stock rejects the order immediately. Exhausted failures produce a message in `orders.dead`; replay keeps the original reservation key.
-
-**Keep the processing visible.** Order details show status, errors, retry timing, correlation IDs and an event timeline. This makes it possible to inspect a failure from the interface and follow it through the logs.
-
-```mermaid
-flowchart LR
-    UI[React] --> API[Order API]
-    API -->|Order + outbox| DB[(PostgreSQL)]
-    DB --> Publisher[Outbox publisher]
-    Publisher --> MQ[RabbitMQ]
-    MQ --> Worker
-    Worker -->|Reserve stock| Warehouse[Warehouse API]
-    Warehouse --> DB
-    Worker -->|Status + retries| DB
-```
-
 ## Code structure
 
 The HTTP layer handles requests and responses. Application services handle order creation, processing and reservations; domain objects hold order state and replay behavior. EF Core and RabbitMQ code have their own folders.
