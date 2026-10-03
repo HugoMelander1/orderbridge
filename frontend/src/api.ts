@@ -25,4 +25,7 @@ export class ApiClient {
     return response.json();
   }
 }
-export const api = new ApiClient();
+export const isSimulation = import.meta.env.VITE_DEMO_MODE === "true";
+export const api = isSimulation
+  ? new (await import("./simulation")).Simulation()
+  : new ApiClient();

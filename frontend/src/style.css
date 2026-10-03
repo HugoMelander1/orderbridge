@@ -653,3 +653,14 @@ label select {
     padding: 45px 24px;
   }
 }
+.demo-notice {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem;
+  border: 1px solid #809b91;
+  border-radius: 0.5rem;
+  background: #eef6f2;
+  color: #12241d;
+  line-height: 1.6;
+}
+.demo-notice p { margin: 0.5rem 0; }
+.demo-notice a { color: #245b47; text-decoration: underline; }

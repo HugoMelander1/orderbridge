@@ -14,7 +14,21 @@ flowchart LR
     UI -->|Polling| API
 ```
 
-## Object-oriented responsibilities
+## Code structure
+
+The backend separates HTTP endpoints from application services, domain objects and infrastructure. `Program.cs` configures dependencies and starts the host; `OrderEndpoints` and `InventoryEndpoints` map the HTTP routes.
+
+| Folder in `OrderBridge.Core` | Responsibility |
+| --- | --- |
+| `Domain` | Orders, products, reservations and events. `Order` owns replay state changes. |
+| `Contracts` | Request, response and message records shared between services. |
+| `Application` | Order creation, processing, reservations and validation. |
+| `Data` | EF Core context, read queries and design-time database configuration. |
+| `Infrastructure` | RabbitMQ connections, outbox publication and health probes. |
+
+The browser demo uses the same separation: `Simulation` adapts UI requests, `SimulationService` handles processing and reservations, `SimulationStore` owns visitor data, and `SimulationClock` schedules attempts. It has no external database or broker; reloading resets the visitor's state.
+
+## Class responsibilities
 
 - **OrderService** validates and creates orders atomically with outbox messages, and controls replay.
 - **OrderProcessor** coordinates one message attempt, reservation HTTP communication, outcome, retry policy and event persistence.

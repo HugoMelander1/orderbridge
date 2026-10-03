@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { api, type Order, type Product } from "./api";
+import { api, isSimulation, type Order, type Product } from "./api";
 import { OrderForm } from "./OrderForm";
 import "./style.css";
 const statuses = ["Pending", "Processing", "Reserved", "Rejected", "Failed"];
@@ -134,7 +134,7 @@ function App() {
   return (
     <div className="shell">
       <aside>
-        <a className="brand" href="/">
+        <a className="brand" href={import.meta.env.BASE_URL}>
           ▰ <span>OrderBridge</span>
         </a>
         <span className="eyebrow">INTEGRATION WORKSPACE</span>
@@ -145,7 +145,8 @@ function App() {
           <a href="#demo">⚙ &nbsp; Demo controls</a>
         </nav>
         <div className="aside-bottom">
-          <span className="dot" /> Local development
+          <span className="dot" />{" "}
+          {isSimulation ? "Browser simulation" : "Local development"}
           <small>
             At-least-once delivery
             <br />
@@ -156,8 +157,28 @@ function App() {
       <main>
         <header>
           <span className="muted">Workspace / Orders</span>
-          <span className="environment">DEVELOPMENT</span>
+          <span className="environment">
+            {isSimulation ? "INTERACTIVE DEMO" : "DEVELOPMENT"}
+          </span>
         </header>
+        {isSimulation && (
+          <div className="demo-notice">
+            <strong>Try OrderBridge</strong>
+            <p>
+              Create an order, change the warehouse mode and follow retries or
+              replay. This browser demo simulates the backend; it does not
+              connect to .NET, PostgreSQL or RabbitMQ. Your orders stay in this
+              tab and reset when you reload.
+            </p>
+            <a
+              href="https://github.com/HugoMelander1/orderbridge"
+              target="_blank"
+              rel="noreferrer"
+            >
+              View the .NET source on GitHub
+            </a>
+          </div>
+        )}
         <section className="heading">
           <div>
             <span className="eyebrow">OPERATIONS</span>
@@ -176,7 +197,13 @@ function App() {
               <i
                 className={
                   "dot " +
-                  (deps ? (deps[key as "postgres"] ? "up" : "down") : "unknown")
+                  (isSimulation
+                    ? "unknown"
+                    : deps
+                      ? deps[key as "postgres"]
+                        ? "up"
+                        : "down"
+                      : "unknown")
                 }
               />
               {
@@ -187,13 +214,15 @@ function App() {
                 }[key]
               }{" "}
               <small>
-                {deps
-                  ? deps[key as "postgres"]
-                    ? "Connected"
-                    : "Unavailable"
-                  : loading
-                    ? "Checking…"
-                    : "Not checked"}
+                {isSimulation
+                  ? "Simulated"
+                  : deps
+                    ? deps[key as "postgres"]
+                      ? "Connected"
+                      : "Unavailable"
+                    : loading
+                      ? "Checking…"
+                      : "Not checked"}
               </small>
             </span>
           ))}
@@ -351,10 +380,14 @@ function App() {
         {deps?.demoEnabled && (
           <section id="demo" className="panel demo">
             <div>
-              <span className="eyebrow">LOCAL DEMO ONLY</span>
+              <span className="eyebrow">
+                {isSimulation ? "BROWSER SIMULATION" : "LOCAL DEMO ONLY"}
+              </span>
               <h2>Test the unexpected.</h2>
               <p className="muted">
-                Simulate warehouse conditions and inspect real retry behavior.
+                {isSimulation
+                  ? "Choose a warehouse response. Retries wait 5, 15 and 30 seconds."
+                  : "Simulate warehouse conditions and inspect real retry behavior."}
               </p>
             </div>
             <div className="demo-controls">

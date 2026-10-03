@@ -1,63 +1,92 @@
-# OrderBridge
+﻿# OrderBridge
 
-A portfolio integration system that takes an order from a React form to a durable warehouse reservation through ASP.NET Core, PostgreSQL and RabbitMQ. It makes failure behavior visible: scheduled retries, business rejections, dead letters, controlled replay and a correlated event timeline.
+OrderBridge connects an order form to a warehouse service. The frontend is built with React, the backend with ASP.NET Core, and orders are processed through RabbitMQ and stored in PostgreSQL.
 
-## Start locally
+The project focuses on what happens when the warehouse is slow or unavailable: retries, failed orders, replay and avoiding duplicate stock reservations.
 
-Install **Docker Desktop with Linux containers and Docker Compose v2**. Docker must be running. From this repository:
+## Web demo
+
+[Try OrderBridge](https://orderbridge-hugo-demo.hugomelander1.chatgpt.site)
+
+Create an order, change the warehouse mode and follow the timeline. The public demo runs a browser simulation; it does not connect to the .NET backend, PostgreSQL or RabbitMQ. Each visitor has separate data, which resets on reload. The full backend can be run locally using the instructions below.
+
+## Run locally
+
+`localhost:5173` points to your own computer. Use the public demo above to try the interface without installing anything, or start the full backend below.
+
+Install Docker Desktop, enable Linux containers and make sure Docker is running. From the repository folder, run:
 
 ```sh
 docker compose up --build
 ```
 
-Open **http://localhost:5173**. Compose waits for infrastructure health, applies the checked-in EF migration and seeds three products once. Named volumes preserve orders, stock, reservation keys and messages across restart. An optional `.env` copied from `.env.example` overrides disposable local credentials; no configuration step is required for the defaults.
+When the services have started, open <http://localhost:5173>.
 
-| Component | Local address |
+The first start creates the database and adds three products. Orders and stock are kept in Docker volumes between restarts. You can override the local passwords by copying `.env.example` to `.env`, but the defaults work without extra setup.
+
+| Service | Address |
 | --- | --- |
-| React workspace | http://localhost:5173 |
+| Web app | http://localhost:5173 |
 | Order API | http://localhost:5080 |
-| Order OpenAPI document | http://localhost:5080/openapi/v1.json |
-| Warehouse API / OpenAPI | http://localhost:5081/openapi/v1.json |
+| Order API specification | http://localhost:5080/openapi/v1.json |
+| Warehouse API specification | http://localhost:5081/openapi/v1.json |
 | RabbitMQ management | http://localhost:15672 |
 | PostgreSQL | localhost:5432 |
 
-RabbitMQ's default demo login is `orderbridge` / `orderbridge-local`. All published ports bind to `127.0.0.1`. These example credentials are **local demo values**, not production secrets.
+RabbitMQ login: `orderbridge` / `orderbridge-local`. Compose binds the ports to your computer's loopback address.
 
-## What to explore
+If the page does not open, check that Docker is running and inspect the services:
 
-- Status dashboard and searchable, filtered, paginated orders.
-- Order creation with seeded products, backend validation and clear errors.
-- Order details with products, retry information, correlation ID and event timeline.
-- Actual PostgreSQL, RabbitMQ and warehouse health checks.
-- A local simulator for normal operation, slow replies, temporary HTTP errors and insufficient stock.
-- Failed-order replay and a real reservation count proving idempotency.
+```sh
+docker compose ps
+docker compose logs api frontend
+```
 
-Start with [the demo guide](docs/demo.md): enable TemporaryError, create an order, observe a retry, restore Normal, then see Reserved and one reservation. The guide also covers exhaustion, DLQ, replay and worker restart.
+## Try it
 
-## Architecture
+Create an order and open its details to follow the processing timeline. The demo panel lets you change how the warehouse responds.
+
+To try a retry, select **TemporaryError**, create an order, then switch back to **Normal**. The order should become **Reserved**, with one successful reservation. Leaving the error enabled causes the order to fail after four attempts; you can then restore Normal and replay it.
+
+The [demo guide](docs/demo.md) also covers insufficient stock, timeouts and restarting the worker.
+
+## How it works
 
 ```mermaid
 flowchart LR
-    React -->|HTTP| OrderAPI[Order API]
-    OrderAPI -->|Order + outbox transaction| PostgreSQL[(PostgreSQL)]
-    PostgreSQL --> OutboxPublisher[Outbox publisher / Worker]
-    OutboxPublisher -->|Confirm + persistent message| RabbitMQ[(RabbitMQ)]
-    RabbitMQ --> Processor[Order processor / Worker]
-    Processor -->|HTTP + order idempotency key| Inventory[Inventory API]
-    Inventory -->|Reservation + stock transaction| PostgreSQL
-    Processor -->|Status, events, retry/dead outbox| PostgreSQL
-    OutboxPublisher --> DLQ[(orders.dead)]
+    React -->|HTTP| API[Order API]
+    API -->|Order and outbox message| DB[(PostgreSQL)]
+    DB --> Publisher[Outbox publisher]
+    Publisher --> RabbitMQ
+    RabbitMQ --> Worker
+    Worker -->|HTTP reservation| Inventory[Warehouse API]
+    Inventory --> DB
+    Worker -->|Status and retry messages| DB
 ```
 
-The C# application uses an object-oriented structure with injected services: `OrderService`, `OrderProcessor`, `InventoryService` and `OutboxPublisher`. API endpoints delegate to these classes; the hosted worker owns connection recovery and broker acknowledgment. React separates the order form and HTTP client from the workspace. See [architecture decisions and limitations](docs/architecture.md).
+The API saves each order and its outgoing message in the same transaction. A worker publishes the message to RabbitMQ and calls the warehouse to reserve stock.
 
-Delivery is **at-least-once with idempotent processing**. Orders and outgoing messages are committed together. Publication waits for RabbitMQ confirms; acknowledgment occurs after database processing commits. Crash windows can create duplicate messages. Stable, database-enforced reservation keys and transactional stock locks prevent duplicate reservations and negative stock. Temporary warehouse errors retry after 5, 15 and 30 seconds; insufficient stock is a final business rejection. Exhausted failures generate a durable dead-letter outbox message. Replay keeps the reservation key and advances the generation to ignore stale deliveries.
+Messages can be delivered more than once. The warehouse stores a reservation key for each order so repeated calls do not subtract stock again. Temporary failures retry after 5, 15 and 30 seconds. Insufficient stock rejects the order without retrying. Failed orders go to `orders.dead`; replay starts another processing round with the same reservation key.
 
-## Develop in VS Code or Visual Studio
+See [architecture.md](docs/architecture.md) for the transaction boundaries and current limitations.
 
-Prerequisites: **.NET 10 SDK**, **Node.js 24**, and Docker Desktop. Versions are pinned in project files, the npm lockfile and NuGet lockfiles. Open `OrderBridge.slnx` in a .NET 10-compatible Visual Studio, or open this folder in VS Code with C# Dev Kit. Existing editor recommendations are preserved.
+The code is grouped by responsibility:
 
-Start infrastructure only:
+| Layer | Location |
+| --- | --- |
+| HTTP endpoints and application startup | `src/OrderBridge.Api`, `src/OrderBridge.Inventory` |
+| Domain objects | `src/OrderBridge.Core/Domain` |
+| Request, response and message contracts | `src/OrderBridge.Core/Contracts` |
+| Business logic | `src/OrderBridge.Core/Application` |
+| Database context and read queries | `src/OrderBridge.Core/Data` |
+| RabbitMQ and outbox publishing | `src/OrderBridge.Core/Infrastructure` |
+| Browser demo services, data and clock | `frontend/src/demo` |
+
+## Development
+
+You need .NET 10 SDK, Node.js 24 and Docker Desktop. Open `OrderBridge.slnx` in Visual Studio or the repository folder in VS Code.
+
+Start PostgreSQL and RabbitMQ:
 
 ```sh
 docker compose up -d postgres rabbit
@@ -65,7 +94,7 @@ dotnet restore
 dotnet tool restore
 ```
 
-Run each process in a separate terminal, starting the API first so its migration finishes before the warehouse and worker:
+Run these in separate terminals. Start the Order API first so it can apply the database migrations:
 
 ```sh
 dotnet run --project src/OrderBridge.Api --launch-profile http
@@ -73,7 +102,7 @@ dotnet run --project src/OrderBridge.Inventory --launch-profile http
 dotnet run --project src/OrderBridge.Worker
 ```
 
-Then in another terminal:
+Start the frontend in another terminal:
 
 ```sh
 cd frontend
@@ -81,55 +110,42 @@ npm ci
 npm run dev
 ```
 
-On Windows PowerShell with restricted script execution, use `npm.cmd` and `npx.cmd`. Vite proxies `/api` to port 5080. Development settings include the same disposable credentials as Compose. If you override them in `.env`, also override `ConnectionStrings__Database` and `RabbitUri` for processes launched outside Compose, or use .NET user secrets. `.env` is not read by .NET automatically.
+Vite proxies `/api` to port 5080. On Windows, use `npm.cmd` or `npx.cmd` if PowerShell blocks the scripts.
 
-To add a schema change:
+The development settings use the same local credentials as Compose. If you change `.env`, update `ConnectionStrings__Database` and `RabbitUri` for the .NET processes too: .NET does not load `.env` automatically.
+
+To create a database migration:
 
 ```sh
 dotnet ef migrations add YourChange --project src/OrderBridge.Core --output-dir Migrations
 ```
 
-The API applies pending migrations on startup. The checked-in migration contains deterministic product seed data; it does not refill inventory on subsequent starts.
-
-## Tests and checks
+## Tests
 
 ```sh
 dotnet build
 dotnet test --filter Category=Unit
 dotnet test --filter Category=Integration
 cd frontend
+npm ci
 npm run build
 npm test
 ```
 
-The frontend build includes strict TypeScript checking. Integration tests require Docker and start **real PostgreSQL and RabbitMQ** using Testcontainers. They cover durable duplicate reservations, duplicate messages, business rejection, concurrency, lost responses, scheduled retries, exhaustion, DLQ publication, replay and persisted outbox dispatch. HTTP is replaced with a test handler for service-level tests; the end-to-end suite uses the actual processes and HTTP calls.
+Integration tests use PostgreSQL and RabbitMQ through Testcontainers and require Docker. They cover reservations, duplicate delivery, retries, dead letters and replay.
 
-With the complete Compose application running:
+For browser tests, start the full application with Compose, then run from `frontend`:
 
 ```sh
-cd frontend
 npx playwright install chromium
 npm run e2e -- --workers=1
 ```
 
-End-to-end tests cover temporary error recovery with exactly one reservation and exhausted retries with actual RabbitMQ DLQ inspection and replay. They change local demo state; use a disposable development environment. GitHub Actions builds both stacks, runs unit/integration tests, starts Compose and runs browser end-to-end tests, retaining diagnostic artifacts on failure.
+Browser tests create orders and change the warehouse demo mode. GitHub Actions runs the backend, frontend and browser tests; results are available in the repository's [Actions tab](https://github.com/HugoMelander1/orderbridge/actions).
 
-### Verification on the authoring machine
+## API
 
-- .NET 10.0.401 and Node 24.16.0 were available.
-- Backend build passed with zero warnings and errors.
-- Five backend unit tests passed.
-- Frontend strict TypeScript check and Vite production build passed.
-- One frontend order-form test passed.
-- Headless Chromium smoke checks passed for desktop/mobile layout, no horizontal overflow and keyboard dialog dismissal against the real frontend with the API offline.
-- Integration execution was attempted, but all eight tests were blocked during fixture setup because Docker was unavailable. No PostgreSQL/RabbitMQ assertions ran.
-- Compose startup and browser end-to-end tests could not run on this machine because Docker was unavailable. They subsequently passed in GitHub Actions using its Linux Docker environment.
-
-### Continuous integration verification
-
-[The complete CI run](https://github.com/HugoMelander1/orderbridge/actions/runs/36887431921) passed backend/frontend builds, all 14 backend tests (five unit and nine PostgreSQL/RabbitMQ integration tests), the frontend form test, Compose health/startup checks and both browser end-to-end scenarios. The regression coverage includes replay after four lost HTTP responses, stale-generation delivery and the original durable reservation key.
-
-## API examples
+Create an order:
 
 ```sh
 curl -X POST http://localhost:5080/api/orders \
@@ -139,21 +155,18 @@ curl -X POST http://localhost:5080/api/orders \
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| POST | `/api/orders` | Create order and outbox event atomically |
-| GET | `/api/orders?search=&status=&page=1` | Ten orders per page |
-| GET | `/api/orders/{id}` | Order, products JSON, trace and events |
-| GET | `/api/dashboard` | Actual counts by status |
-| GET | `/api/products` | Demo catalog and current stock |
-| GET | `/api/dependencies` | Live dependency checks and demo availability |
-| POST | `/api/orders/{id}/replay` | Replay a Failed order, Development only |
-| GET/POST | `/api/demo` | Read/change warehouse mode, Development only |
-| GET | `/api/reservations/{id}` | Real successful reservation count, Development only |
+| POST | `/api/orders` | Create an order |
+| GET | `/api/orders?search=&status=&page=1` | Search and filter orders |
+| GET | `/api/orders/{id}` | Order details and timeline |
+| GET | `/api/dashboard` | Order counts by status |
+| GET | `/api/products` | Products and current stock |
+| GET | `/api/dependencies` | Dependency health |
+| POST | `/api/orders/{id}/replay` | Replay a failed order |
+| GET/POST | `/api/demo` | Read or change the warehouse mode |
+| GET | `/api/reservations/{id}` | Successful reservation count |
 
-Validation and conflict responses use HTTP 400/409 with Problem Details; unknown orders use 404. The OpenAPI documents describe request bodies and routes. JSON console logs and order events retain trace IDs through the integration flow.
+Replay, demo mode and reservation count endpoints are available only in Development.
 
-## Public deployment and repository hygiene
+## Scope
 
-This repository is prepared for `HugoMelander1/orderbridge`. Build outputs, local data, `.env`, user settings and dependency directories are ignored. Only disposable local credentials appear in example/development configuration. No invented screenshots or integration results are included.
-
-Public deployment requires authentication and authorization, protected warehouse endpoints, proper secret management, TLS, rate limiting and separate database ownership. Run production services in Production; demo and replay routes are not mapped there. Do not expose the Development Compose stack publicly. The current single worker and shared database are documented portfolio tradeoffs, not a production scale claim.
-
+The public demo is a browser simulation. In the full backend, the services share a database and the worker processes one message at a time. Hosting that backend publicly needs authentication, protected warehouse endpoints, TLS and production secret management. The development Compose setup is intended for local use.
